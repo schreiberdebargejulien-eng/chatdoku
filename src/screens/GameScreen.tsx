@@ -44,8 +44,10 @@ export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
   const [confirmRestart, setConfirmRestart] = useState(false);
 
   // Timer: counts only while the game is visible, running and not paused.
+  const running = !!game && game.status === 'playing' && !paused;
+  const gameKey = game ? `${game.puzzle.id}@${game.startedAt}` : '';
   useEffect(() => {
-    if (!game || game.status !== 'playing' || paused) return;
+    if (!running) return;
     let last = performance.now();
     const id = window.setInterval(() => {
       const now = performance.now();
@@ -53,7 +55,7 @@ export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
       last = now;
     }, 1000);
     return () => window.clearInterval(id);
-  }, [game?.status, paused, game, store]);
+  }, [running, gameKey, store]);
 
   // Leaving the app pauses the game.
   useEffect(() => {

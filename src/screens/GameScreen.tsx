@@ -4,8 +4,9 @@ import { Board } from '../components/Board';
 import { MessageBar } from '../components/MessageBar';
 import { ConfirmModal, GameOverModal, PauseModal, VictoryModal } from '../components/overlays';
 import { Toolbar } from '../components/Toolbar';
-import { TopBar } from '../components/TopBar';
+import { RuleChips, StatusRow, TopBar } from '../components/TopBar';
 import { blockedOf } from '../game/gameLogic';
+import type { GestureIntent } from '../input/gestureEngine';
 import { hasProgress, useGameStore, type Screen } from '../store/gameStore';
 import { assignRegionColors } from '../theme/palette';
 import type { CellIndex } from '../game-engine';
@@ -29,11 +30,33 @@ function useFitSquare() {
   return { ref, side };
 }
 
+/** Single dispatcher from gesture intents to store actions. */
+function dispatchIntents(intents: readonly GestureIntent[]): void {
+  const s = useGameStore.getState();
+  for (const it of intents) {
+    switch (it.type) {
+      case 'cross-down':
+        s.strokeStart(it.cell);
+        break;
+      case 'stroke':
+        s.strokeExtend(it.cells);
+        break;
+      case 'cross-off':
+        s.crossOff(it.cell);
+        break;
+      case 'double':
+        s.doubleTap(it.cell);
+        break;
+      case 'end':
+        s.gestureEnd();
+        break;
+    }
+  }
+}
+
 export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const game = useGameStore((s) => s.game);
   const settings = useGameStore((s) => s.settings);
-  const tool = useGameStore((s) => s.tool);
-  const selected = useGameStore((s) => s.selected);
   const paused = useGameStore((s) => s.paused);
   const feedback = useGameStore((s) => s.feedback);
   const hintView = useGameStore((s) => s.hintView);
@@ -73,38 +96,20 @@ export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
   // Messages fade away on their own.
   useEffect(() => {
     if (!feedback) return;
-    const id = window.setTimeout(() => store().dismissFeedback(), feedback.kind === 'error' ? 3200 : 2200);
+    const id = window.setTimeout(() => store().dismissFeedback(), feedback.kind === 'error' ? 3000 : 2000);
     return () => window.clearTimeout(id);
   }, [feedback, store]);
 
-  const colors = useMemo(() => (game ? assignRegionColors(game.puzzle, game.puzzle.seed) : []), [game?.puzzle]);
-  const blocked = useMemo(() => (game ? blockedOf(game) : new Set<CellIndex>()), [game?.marks, game?.puzzle]);
+  const puzzle = game?.puzzle;
+  const marks = game?.marks;
+  const colors = useMemo(() => (puzzle ? assignRegionColors(puzzle, puzzle.seed) : []), [puzzle]);
+  const blocked = useMemo(() => (game ? blockedOf(game) : new Set<CellIndex>()), [marks, puzzle]); // eslint-disable-line react-hooks/exhaustive-deps
   const collection = getCollection(settings.collection);
-
-  const onTap = useCallback(
-    (cell: CellIndex) => {
-      const s = store();
-      if (s.settings.inputMode === 'quick' || s.selected === cell) {
-        s.selectCell(cell);
-        s.act(s.tool, cell);
-      } else {
-        s.selectCell(cell);
-      }
-    },
-    [store],
-  );
-
-  const onTool = useCallback(
-    (t: 'cat' | 'cross') => {
-      const s = store();
-      if (s.selected !== null && s.settings.inputMode === 'select') s.act(t);
-      else s.setTool(t);
-    },
-    [store],
-  );
+  const onIntents = useCallback((intents: readonly GestureIntent[]) => dispatchIntents(intents), []);
 
   if (!game) return null;
   const playing = game.status === 'playing';
+  const placed = game.marks.reduce((n, m) => n + (m === 'cat' ? 1 : 0), 0);
 
   return (
     <div className="flex h-full flex-col">
@@ -112,10 +117,12 @@ export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
         level={game.puzzle.difficulty}
         size={game.puzzle.size}
         elapsedMs={game.elapsedMs}
-        lives={game.lives}
         onBack={() => onNavigate('home')}
+        onPause={() => store().pause()}
       />
-      <div ref={ref} className="flex min-h-0 flex-1 items-center justify-center px-3 pt-1">
+      <RuleChips />
+      <StatusRow placed={placed} total={game.puzzle.size} lives={game.lives} />
+      <div ref={ref} className="flex min-h-0 flex-1 items-center justify-center px-3">
         <div style={{ width: side || '100%', maxWidth: 560 }}>
           <Board
             game={game}
@@ -123,35 +130,22 @@ export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
             collection={collection}
             blocked={blocked}
             showBlocked={settings.showBlocked}
-            selected={selected}
             feedback={feedback}
             hintView={hintView}
             hidden={paused}
-            crossDrag={tool === 'cross' || settings.inputMode === 'quick'}
-            onTap={onTap}
-            onPaint={(cells, on) => store().paint(cells, on)}
+            doubleTapMs={settings.doubleTapMs}
+            onIntents={onIntents}
           />
         </div>
       </div>
       <MessageBar
-        placed={game.marks.filter((m) => m === 'cat').length}
-        total={game.puzzle.size}
         feedback={feedback}
         hintView={hintView}
         onCloseHint={() => store().closeHint()}
         onMoreHint={() => store().requestHint()}
         onDismiss={() => store().dismissFeedback()}
       />
-      <Toolbar
-        tool={tool}
-        onTool={onTool}
-        onErase={() => store().erase()}
-        onUndo={() => store().undo()}
-        onHint={() => store().requestHint()}
-        onPause={() => store().pause()}
-        canUndo={playing && game.history.length > 0}
-        hintsUsed={game.hintsUsed}
-      />
+      <Toolbar onUndo={() => store().undo()} onHint={() => store().requestHint()} canUndo={playing && game.history.length > 0} hintsUsed={game.hintsUsed} />
 
       <PauseModal
         open={paused && playing && !confirmRestart}
@@ -176,12 +170,7 @@ export function GameScreen({ onNavigate }: { onNavigate: (s: Screen) => void }) 
         }}
       />
       {game.status === 'won' && (
-        <VictoryModal
-          game={game}
-          outcome={outcome}
-          onNext={() => void store().startNewGame(game.puzzle.difficulty)}
-          onHome={() => onNavigate('home')}
-        />
+        <VictoryModal game={game} outcome={outcome} onNext={() => void store().startNewGame(game.puzzle.difficulty)} onHome={() => onNavigate('home')} />
       )}
       {game.status === 'lost' && (
         <GameOverModal

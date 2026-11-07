@@ -66,11 +66,12 @@ export function RulesScreen({ onBack }: { onBack: () => void }) {
           Même en diagonale, et même entre deux régions différentes. Les 8 cases autour d’un chat sont interdites.
         </Rule>
         <div className="rounded-2xl bg-orange-soft/70 p-4">
-          <div className="font-rounded mb-1 text-[17px] font-extrabold">Les outils</div>
+          <div className="font-rounded mb-1 text-[17px] font-extrabold">Les gestes</div>
           <ul className="space-y-1.5 text-[14px] leading-snug text-ink-soft">
-            <li>🐾 <b className="text-ink">Chat</b> : place un chat sur la case sélectionnée.</li>
-            <li>✕ <b className="text-ink">Croix</b> : marque une case que tu penses impossible. Gratuit, sans risque.</li>
-            <li>❤️ Un chat qui enfreint une règle coûte <b className="text-ink">une vie</b>. Trois erreurs et la partie s’arrête.</li>
+            <li>👆 <b className="text-ink">Une touche</b> : pose une croix sur une case que tu penses impossible. Touche-la encore pour l’effacer.</li>
+            <li>✌️ <b className="text-ink">Double touche</b> : place un chat (ou retire un chat mal placé).</li>
+            <li>〰️ <b className="text-ink">Glisse</b> le doigt : une croix sur chaque case traversée. Le glissement ne place jamais de chat.</li>
+            <li>❤️ Un chat qui enfreint une règle coûte <b className="text-ink">une vie</b>. Trois erreurs et la partie s’arrête. Les croix sont gratuites.</li>
             <li>💡 <b className="text-ink">Indice</b> : une piste, puis une explication, puis la case.</li>
           </ul>
         </div>

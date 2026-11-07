@@ -13,6 +13,18 @@ Jeu de logique mobile (PWA installable sur iPhone). Une grille N×N découpée e
 
 3 vies par partie. Les croix (X) sont des annotations libres et ne coûtent jamais de vie.
 
+## Commandes (directement sur la grille)
+
+| Geste | Effet |
+| --- | --- |
+| **Touche** une case vide | Croix (immédiate, dès le contact) |
+| **Touche** une croix | La croix disparaît |
+| **Double touche** | Chat (validé par le moteur ; une erreur = une seule vie) |
+| **Double touche** sur un chat | Le retire si les règles l'autorisent (en mode strict, un chat correct est verrouillé) |
+| **Glisser** | Croix sur chaque case traversée (jamais de chat, jamais de vie perdue) |
+
+Toute l'entrée tactile passe par un seul module, `src/input/gestureEngine.ts` (Pointer Events, capture du pointeur, événements coalescés, interpolation entre deux positions pour ne sauter aucune case). Un filtre anti-clic fantôme (`src/input/ghostClick.ts`) neutralise les clics de compatibilité émis après un toucher. La fenêtre du double tap (220, 280 ou 380 ms) se règle dans les Paramètres.
+
 ## Stack
 
 React 19 · TypeScript strict · Vite · Tailwind CSS 4 · Framer Motion · Zustand · vite-plugin-pwa (Workbox) · Vitest.
@@ -31,6 +43,7 @@ src/
     generator.ts      Génération : placement → régions → unicité garantie
     difficulty.ts     Évaluation et classement de la difficulté
     hints.ts          Indices à 3 niveaux fondés sur la logique et la solution
+  input/              Reconnaissance des gestes (tap, double tap, glisser) + anti-clic fantôme
   game/gameLogic.ts   Boucle de jeu pure : vies, X, annuler, victoire/défaite
   stats/stats.ts      Statistiques et succès
   store/gameStore.ts  État global (Zustand) + sauvegarde automatique
@@ -65,6 +78,7 @@ npm test           # tests unitaires
 npm run build      # build de production dans dist/
 npm run preview    # sert dist/ (service worker actif)
 npm run icons      # régénère les icônes à partir de l'illustration (nécessite Playwright)
+npm run e2e        # tests tactiles réels (Chromium, émulation iPhone) — lancer `npm run preview` avant
 ```
 
 ## Déploiement

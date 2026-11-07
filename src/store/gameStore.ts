@@ -5,15 +5,13 @@ import {
   applyHintAction,
   blockedOf,
   boardSignature,
-  canRemoveCat,
   catsOf,
   clearCrosses,
   countHint,
   createGame,
   crossesOf,
+  doubleTap,
   paintCrosses,
-  placeCat,
-  removeCat,
   setCross,
   tick,
   undo,
@@ -29,11 +27,9 @@ import { haptic, playSound, setSoundEnabled } from '../audio/sounds';
 import { assignRegionColors, regionDisplayName } from '../theme/palette';
 
 export type Screen = 'home' | 'game' | 'stats' | 'settings' | 'rules';
-export type Tool = 'cat' | 'cross';
-export type InputMode = 'select' | 'quick';
-
 export interface Settings extends GameSettings {
-  readonly inputMode: InputMode;
+  /** Double tap window, in ms (tunable for each player's rhythm). */
+  readonly doubleTapMs: number;
   /** Shade the cells ruled out by the cats already placed. */
   readonly showBlocked: boolean;
   readonly sound: boolean;
@@ -42,7 +38,7 @@ export interface Settings extends GameSettings {
 
 export const DEFAULT_APP_SETTINGS: Settings = {
   ...DEFAULT_SETTINGS,
-  inputMode: 'select',
+  doubleTapMs: 280,
   showBlocked: true,
   sound: true,
   collection: 'classique',
@@ -75,8 +71,6 @@ interface StoreState {
   game: GameState | null;
   settings: Settings;
   stats: Stats;
-  tool: Tool;
-  selected: CellIndex | null;
   paused: boolean;
   loading: DifficultyLevel | null;
   loadError: string | null;
@@ -90,12 +84,16 @@ interface StoreState {
   startNewGame: (level: DifficultyLevel) => Promise<void>;
   restartGame: () => void;
   continueGame: () => void;
-  selectCell: (cell: CellIndex | null) => void;
-  setTool: (tool: Tool) => void;
-  /** Applies a tool on a cell (selected cell by default). */
-  act: (tool: Tool, cell?: CellIndex) => void;
-  erase: (cell?: CellIndex) => void;
-  paint: (cells: readonly CellIndex[], on: boolean) => void;
+  /** Finger down on an empty cell: a cross appears and a stroke opens. */
+  strokeStart: (cell: CellIndex) => void;
+  /** Cells crossed by the sliding finger (crosses on empty cells only). */
+  strokeExtend: (cells: readonly CellIndex[]) => void;
+  /** Tap on a crossed cell: the cross goes away. */
+  crossOff: (cell: CellIndex) => void;
+  /** Double tap: cat placement or removal. */
+  doubleTap: (cell: CellIndex) => void;
+  /** End of a gesture (closes the undo group). */
+  gestureEnd: () => void;
   undo: () => void;
   requestHint: () => void;
   closeHint: () => void;
@@ -110,6 +108,10 @@ interface StoreState {
 
 let feedbackId = 1;
 let loadToken = 0;
+/** Undo entry of the stroke being drawn (null when no stroke is open). */
+let openStroke: number | null = null;
+/** History length right after the last single tap, to revert it on a double tap. */
+let lastTapHistory: { cell: CellIndex; length: number } | null = null;
 
 /** Whether the current game counts as started (abandoning it is a defeat). */
 export function hasProgress(game: GameState | null): boolean {
@@ -133,7 +135,6 @@ export const useGameStore = create<StoreState>()(
           stats: res.stats,
           recorded: [...get().recorded.slice(-30), game.puzzle.id + game.startedAt],
           outcome: { gameId: game.puzzle.id, result: game.status, unlocked: res.unlocked, newBest: res.newBest },
-          selected: null,
           hintView: null,
         });
         playSound(game.status === 'won' ? 'win' : 'lose');
@@ -154,8 +155,6 @@ export const useGameStore = create<StoreState>()(
         game: null,
         settings: DEFAULT_APP_SETTINGS,
         stats: createStats(),
-        tool: 'cat',
-        selected: null,
         paused: false,
         loading: null,
         loadError: null,
@@ -177,12 +176,10 @@ export const useGameStore = create<StoreState>()(
               game: createGame(puzzle),
               screen: 'game',
               loading: null,
-              selected: null,
               paused: false,
               feedback: null,
               hintView: null,
               outcome: null,
-              tool: 'cat',
             });
           } catch {
             if (token === loadToken) set({ loading: null, loadError: 'Impossible de préparer la grille. Réessaie.' });
@@ -195,7 +192,6 @@ export const useGameStore = create<StoreState>()(
           abandonIfStarted();
           set({
             game: createGame(game.puzzle),
-            selected: null,
             paused: false,
             feedback: null,
             hintView: null,
@@ -208,47 +204,51 @@ export const useGameStore = create<StoreState>()(
           if (get().game) set({ screen: 'game', paused: false });
         },
 
-        selectCell: (cell) => {
-          set({ selected: cell });
+        strokeStart: (cell) => {
+          const { game, paused } = get();
+          if (!game || paused || game.status !== 'playing' || game.marks[cell] !== 'empty') return;
+          const next = paintCrosses(game, [cell], true);
+          openStroke = next.history.length;
+          lastTapHistory = { cell, length: next.history.length };
+          playSound('cross');
+          set({ game: next, hintView: null });
         },
 
-        setTool: (tool) => set({ tool }),
+        strokeExtend: (cells) => {
+          const { game, paused } = get();
+          if (!game || paused || game.status !== 'playing') return;
+          // Join the open stroke if it is still the last undo entry.
+          const merge = openStroke !== null && openStroke === game.history.length;
+          const next = paintCrosses(game, cells, true, merge);
+          if (next === game) return;
+          openStroke = next.history.length;
+          lastTapHistory = null;
+          playSound('cross');
+          set({ game: next, hintView: null });
+        },
 
-        act: (tool, cellArg) => {
-          const { game, settings, selected } = get();
-          const cell = cellArg ?? selected;
-          if (!game || game.status !== 'playing' || cell === null || get().paused) return;
-          set({ tool });
-          if (tool === 'cross') {
-            const cur = game.marks[cell];
-            if (cur === 'cat') {
-              if (canRemoveCat(game, cell, settings)) {
-                const t = removeCat(game, cell, settings);
-                commit(setCross(t.state, cell, true).state);
-                playSound('cross');
-              }
-              return;
-            }
-            const t = setCross(game, cell, cur !== 'cross');
-            if (t.event.type === 'cross') {
-              playSound('cross');
-              haptic(5);
-              set({ hintView: null });
-            }
-            commit(t.state);
-            return;
-          }
-          // Cat tool
-          if (game.marks[cell] === 'cat') {
-            if (canRemoveCat(game, cell, settings)) {
-              commit(removeCat(game, cell, settings).state);
-              playSound('tap');
-            } else {
-              set({ feedback: { id: feedbackId++, kind: 'info', message: 'Ce chat est bien à sa place : il ne bouge plus !' } });
-            }
-            return;
-          }
-          const t = placeCat(game, cell, settings);
+        crossOff: (cell) => {
+          const { game, paused } = get();
+          if (!game || paused) return;
+          const t = setCross(game, cell, false);
+          if (t.event.type !== 'cross') return;
+          lastTapHistory = { cell, length: t.state.history.length };
+          playSound('tap');
+          set({ game: t.state, hintView: null });
+        },
+
+        gestureEnd: () => {
+          openStroke = null;
+        },
+
+        doubleTap: (cell) => {
+          const { game, settings, paused } = get();
+          if (!game || paused || game.status !== 'playing') return;
+          const revert = lastTapHistory?.cell === cell && lastTapHistory.length === game.history.length;
+          lastTapHistory = null;
+          openStroke = null;
+          const wasCat = game.marks[cell] === 'cat';
+          const t = doubleTap(game, cell, settings, revert);
           const e = t.event;
           if (e.type === 'error') {
             set({
@@ -270,30 +270,12 @@ export const useGameStore = create<StoreState>()(
             playSound('cat');
             haptic(10);
             set({ hintView: null, feedback: null });
+          } else if (e.type === 'removed') {
+            playSound('tap');
+          } else if (wasCat) {
+            set({ feedback: { id: feedbackId++, kind: 'info', message: 'Ce chat est bien à sa place : il ne bouge plus !' } });
           }
           commit(t.state);
-        },
-
-        erase: (cellArg) => {
-          const { game, settings, selected } = get();
-          const cell = cellArg ?? selected;
-          if (!game || cell === null || game.status !== 'playing') return;
-          const cur = game.marks[cell];
-          if (cur === 'cross') commit(setCross(game, cell, false).state);
-          else if (cur === 'cat') {
-            if (canRemoveCat(game, cell, settings)) commit(removeCat(game, cell, settings).state);
-            else set({ feedback: { id: feedbackId++, kind: 'info', message: 'Ce chat est bien à sa place : il ne bouge plus !' } });
-          }
-        },
-
-        paint: (cells, on) => {
-          const { game } = get();
-          if (!game || get().paused) return;
-          const next = paintCrosses(game, cells, on);
-          if (next !== game) {
-            playSound('cross');
-            commit(next);
-          }
         },
 
         undo: () => {
@@ -301,6 +283,8 @@ export const useGameStore = create<StoreState>()(
           if (!game) return;
           const next = undo(game);
           if (next !== game) {
+            openStroke = null;
+            lastTapHistory = null;
             playSound('tap');
             set({ game: next, hintView: null });
           }
@@ -333,7 +317,8 @@ export const useGameStore = create<StoreState>()(
             }
           }
           playSound('hint');
-          set({ hintView: { hint, signature: boardSignature(next) }, selected: hint.place ?? get().selected });
+          lastTapHistory = null;
+          set({ hintView: { hint, signature: boardSignature(next) } });
           commit(next);
         },
 
@@ -341,6 +326,8 @@ export const useGameStore = create<StoreState>()(
 
         clearAllCrosses: () => {
           const { game } = get();
+          lastTapHistory = null;
+          openStroke = null;
           if (game) commit(clearCrosses(game));
         },
 
@@ -375,13 +362,14 @@ export const useGameStore = create<StoreState>()(
         game: s.game,
         settings: s.settings,
         stats: s.stats,
-        tool: s.tool,
         recorded: s.recorded,
       }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<StoreState>;
         const game = p.game ?? null;
-        const settings = { ...DEFAULT_APP_SETTINGS, ...(p.settings ?? {}) };
+        const { inputMode: _legacy, ...saved } = (p.settings ?? {}) as Partial<Settings> & { inputMode?: unknown };
+        void _legacy;
+        const settings: Settings = { ...DEFAULT_APP_SETTINGS, ...saved };
         setSoundEnabled(settings.sound);
         return {
           ...current,

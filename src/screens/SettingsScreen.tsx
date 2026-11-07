@@ -49,23 +49,30 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
           </Row>
         </Group>
 
-        <Group title="Saisie">
+        <Group title="Commandes">
+          <div className="space-y-1 px-4 pt-3 text-[13.5px] leading-snug text-ink-soft">
+            <p><b className="text-ink">Touche</b> une case : croix (touche-la encore pour l’effacer).</p>
+            <p><b className="text-ink">Double touche</b> : chat (sur un chat : le retirer si possible).</p>
+            <p><b className="text-ink">Glisse</b> le doigt : croix sur toutes les cases traversées.</p>
+          </div>
           <div className="p-3">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="mb-2 px-1 text-[14px] font-semibold">Vitesse du double tap</div>
+            <div className="grid grid-cols-3 gap-2">
               {(
                 [
-                  ['select', 'Sélection', 'Touche une case, puis Chat ou Croix (ou retouche la case).'],
-                  ['quick', 'Rapide', 'Une touche applique l’outil actif. Glisse pour poser des croix.'],
+                  [220, 'Rapide'],
+                  [280, 'Normal'],
+                  [380, 'Détendu'],
                 ] as const
-              ).map(([mode, label, text]) => (
+              ).map(([ms, label]) => (
                 <button
-                  key={mode}
+                  key={ms}
                   type="button"
-                  onClick={() => update({ inputMode: mode })}
-                  className={`rounded-xl p-3 text-left transition ${settings.inputMode === mode ? 'bg-ink text-cream' : 'bg-sand/70'}`}
+                  onClick={() => update({ doubleTapMs: ms })}
+                  className={`rounded-xl py-2.5 text-center transition ${settings.doubleTapMs === ms ? 'bg-ink text-cream' : 'bg-sand/70'}`}
                 >
                   <div className="font-rounded text-[15px] font-extrabold">{label}</div>
-                  <div className={`mt-1 text-[12px] leading-snug ${settings.inputMode === mode ? 'text-cream/75' : 'text-muted'}`}>{text}</div>
+                  <div className={`text-[11.5px] ${settings.doubleTapMs === ms ? 'text-cream/70' : 'text-muted'}`}>{ms} ms</div>
                 </button>
               ))}
             </div>

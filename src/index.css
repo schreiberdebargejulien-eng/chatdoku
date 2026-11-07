@@ -1,0 +1,122 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-cream: #faf8f3;
+  --color-sand: #eee8de;
+  --color-sand-deep: #e2d9cb;
+  --color-ink: #292929;
+  --color-ink-soft: #5c5752;
+  --color-muted: #8f877e;
+  --color-orange: #f2a65a;
+  --color-orange-deep: #e08a37;
+  --color-orange-soft: #fbe3c9;
+  --color-good: #9fd8b0;
+  --color-good-deep: #4fae6d;
+  --color-good-soft: #e3f4e8;
+  --color-bad: #f3a8a6;
+  --color-bad-deep: #d9625f;
+  --color-bad-soft: #fbe4e3;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-rounded: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, 'Nunito', 'Segoe UI', Roboto, sans-serif;
+  --shadow-soft: 0 1px 2px rgb(41 41 41 / 0.04), 0 6px 20px -6px rgb(41 41 41 / 0.12);
+  --shadow-lift: 0 2px 4px rgb(41 41 41 / 0.05), 0 18px 40px -12px rgb(41 41 41 / 0.22);
+}
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+@layer base {
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-cream);
+  color: var(--color-ink);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+}
+
+.font-rounded {
+  font-family: var(--font-rounded);
+}
+
+.app-shell {
+  height: 100dvh;
+  width: 100%;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Scrollable panels (stats, settings) keep momentum scrolling inside only. */
+.scroll-area {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.board-surface {
+  touch-action: none;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-ring {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.hint-pulse {
+  animation: pulse-ring 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

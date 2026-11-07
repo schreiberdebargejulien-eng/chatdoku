@@ -203,8 +203,12 @@ export function toggleCross(state: GameState, cell: CellIndex): Transition {
   return setCross(state, cell, state.marks[cell] !== 'cross');
 }
 
-/** Paints crosses over several cells as a single undoable gesture (drag). */
-export function paintCrosses(state: GameState, cells: readonly CellIndex[], on: boolean): GameState {
+/**
+ * Paints crosses over several cells as a single undoable gesture (drag).
+ * With `merge`, the edits join the last undo entry (a stroke in progress).
+ * Cats are never touched.
+ */
+export function paintCrosses(state: GameState, cells: readonly CellIndex[], on: boolean, merge = false): GameState {
   if (state.status !== 'playing') return state;
   const edits: HistoryEdit[] = [];
   const seen = new Set<CellIndex>();
@@ -215,7 +219,40 @@ export function paintCrosses(state: GameState, cells: readonly CellIndex[], on: 
     if (cur === 'cat' || (cur === 'cross') === on) continue;
     edits.push({ cell, from: cur, to: on ? 'cross' : 'empty' });
   }
+  if (merge && edits.length > 0 && state.history.length > 0) {
+    const marks = [...state.marks];
+    for (const e of edits) marks[e.cell] = e.to;
+    const history = [...state.history];
+    history[history.length - 1] = [...(history[history.length - 1] as readonly HistoryEdit[]), ...edits];
+    return { ...state, marks, history };
+  }
   return withEdits(state, edits);
+}
+
+/**
+ * Double tap on a cell. `revertFirstTap` undoes the effect of the first tap of
+ * the double tap (a cross that appeared or disappeared) so that it leaves no
+ * trace. Then:
+ *  - on a cat: removes it when allowed;
+ *  - otherwise: tries to place a cat. An invalid cat costs one life (at most)
+ *    and the cell is crossed out, since it is now known to be impossible.
+ */
+export function doubleTap(
+  state: GameState,
+  cell: CellIndex,
+  settings: GameSettings = DEFAULT_SETTINGS,
+  revertFirstTap = false,
+): Transition {
+  if (state.status !== 'playing') return { state, event: { type: 'ignored' } };
+  let base = revertFirstTap ? undo(state) : state;
+  if (base.marks[cell] === 'cat') return removeCat(base, cell, settings);
+  const t = placeCat(base, cell, settings);
+  if (t.event.type === 'error') {
+    base = t.state;
+    const crossed = base.status === 'playing' ? setCross(base, cell, true).state : base;
+    return { state: crossed, event: t.event };
+  }
+  return t;
 }
 
 /** Clears every cross (one undoable gesture). */

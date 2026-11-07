@@ -1,5 +1,4 @@
-import { motion, useAnimationControls } from 'framer-motion';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type { CellIndex } from '../game-engine';
 import { catForRegion } from '../cats/collections';
 import type { CatCollection, CatDesign } from '../cats/catTypes';
@@ -7,6 +6,8 @@ import { CatArt } from '../cats/CatArt';
 import type { RegionColor } from '../theme/palette';
 import type { CellMark, GameState } from '../game/gameLogic';
 import type { Feedback, HintView } from '../store/gameStore';
+import { GestureEngine, type GestureIntent, type GridPoint } from '../input/gestureEngine';
+import { armGhostClickGuard, installGhostClickGuard } from '../input/ghostClick';
 
 interface BoardProps {
   readonly game: GameState;
@@ -14,179 +15,188 @@ interface BoardProps {
   readonly collection: CatCollection;
   readonly blocked: ReadonlySet<CellIndex>;
   readonly showBlocked: boolean;
-  readonly selected: CellIndex | null;
   readonly feedback: Feedback | null;
   readonly hintView: HintView | null;
   readonly hidden: boolean;
-  readonly crossDrag: boolean;
-  readonly onTap: (cell: CellIndex) => void;
-  readonly onPaint: (cells: CellIndex[], on: boolean) => void;
+  readonly doubleTapMs: number;
+  readonly onIntents: (intents: readonly GestureIntent[]) => void;
 }
+
+/** Bit flags: which sides of a cell are region borders. */
+const TOP = 1;
+const RIGHT = 2;
+const BOTTOM = 4;
+const LEFT = 8;
+/** Half of the cream gap between two regions (px). */
+const GAP = 1.6;
+const RADIUS = '24%';
 
 interface CellProps {
   readonly mark: CellMark;
-  readonly color: RegionColor;
+  readonly fill: string;
+  readonly edges: number;
   readonly cat: CatDesign;
   readonly blocked: boolean;
-  readonly selected: boolean;
-  readonly hintCell: boolean;
-  /** Faded out while a hint spotlights other cells (keeps region colours true). */
   readonly dimmed: boolean;
-  /** Feedback id when this cell is the faulty one (0 otherwise), to replay the flash. */
-  readonly error: number;
-  readonly conflict: number;
-  readonly preview: boolean | null;
+  readonly hintCell: boolean;
+  /** Feedback id when this cell is the faulty one (0 otherwise): replays the animation. */
+  readonly errorKey: number;
+  readonly conflictKey: number;
   readonly won: boolean;
   readonly revealed: boolean;
   readonly delay: number;
 }
 
-const CrossGlyph = ({ ghost }: { ghost?: boolean }) => (
-  <svg viewBox="0 0 24 24" className={`absolute inset-0 m-auto size-[46%] ${ghost ? 'opacity-35' : 'opacity-60'}`} aria-hidden>
-    <path d="M6 6l12 12M18 6L6 18" stroke="#292929" strokeWidth="3.2" strokeLinecap="round" />
-  </svg>
-);
+const CrossGlyph = memo(function CrossGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="x-draw pointer-events-none absolute inset-0 m-auto size-[44%]" aria-hidden>
+      <path d="M6 6l12 12" pathLength={1} stroke="#2E2A27" strokeOpacity="0.62" strokeWidth="3.4" strokeLinecap="round" fill="none" />
+      <path d="M18 6L6 18" pathLength={1} stroke="#2E2A27" strokeOpacity="0.62" strokeWidth="3.4" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+});
 
 const Cell = memo(function Cell(p: CellProps) {
-  const showCross = p.preview === true || (p.mark === 'cross' && p.preview !== false);
+  const e = p.edges;
+  const tile = {
+    top: e & TOP ? GAP : 0,
+    right: e & RIGHT ? GAP : 0,
+    bottom: e & BOTTOM ? GAP : 0,
+    left: e & LEFT ? GAP : 0,
+    borderTopLeftRadius: e & TOP && e & LEFT ? RADIUS : 0,
+    borderTopRightRadius: e & TOP && e & RIGHT ? RADIUS : 0,
+    borderBottomRightRadius: e & BOTTOM && e & RIGHT ? RADIUS : 0,
+    borderBottomLeftRadius: e & BOTTOM && e & LEFT ? RADIUS : 0,
+    background: p.fill,
+  } as const;
   return (
-    <div className="relative" style={{ background: p.color.fill }}>
-      {p.dimmed && <div className="absolute inset-0 z-[1] bg-cream/60" />}
-      {p.blocked && p.mark === 'empty' && !showCross && (
-        <div className="absolute inset-0 bg-ink/[0.06]">
-          <span className="absolute top-1/2 left-1/2 size-[10%] min-h-1 min-w-1 -translate-1/2 rounded-full bg-ink/20" />
+    <div className="relative">
+      <div key={p.errorKey} className={`absolute inset-0 ${p.errorKey ? 'cell-shake' : ''}`}>
+        <div className="absolute overflow-hidden" style={tile}>
+          {p.blocked && p.mark === 'empty' && (
+            // A discreet dot only: a veil would make regions look two-toned.
+            <span className="fade-in absolute top-1/2 left-1/2 size-[12%] min-h-[5px] min-w-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#2E2A27]/30" />
+          )}
+          {p.errorKey > 0 && <div className="err-flash absolute inset-0 bg-bad-deep" />}
         </div>
-      )}
-      {showCross && <CrossGlyph ghost={p.preview !== null} />}
-      {p.mark === 'cat' && (
-        <motion.div
-          className="absolute inset-[6%]"
-          initial={{ scale: 0.3, opacity: 0, y: 4 }}
-          animate={
-            p.won
-              ? { scale: [1, 1.18, 1], opacity: 1, y: [0, -6, 0], transition: { delay: p.delay, duration: 0.5 } }
-              : { scale: 1, opacity: 1, y: 0 }
-          }
-          transition={{ type: 'spring', stiffness: 520, damping: 20 }}
-        >
-          <CatArt cat={p.cat} mood={p.won ? 'happy' : 'normal'} />
-          {p.revealed && <span className="absolute -top-[6%] -right-[6%] size-[24%] rounded-full border-2 border-white bg-orange" />}
-        </motion.div>
-      )}
-      {p.conflict > 0 && (
-        <motion.div
-          key={`c${p.conflict}`}
-          className="absolute inset-[4%] rounded-[30%] border-[3px] border-bad-deep"
-          initial={{ opacity: 0, scale: 1.3 }}
-          animate={{ opacity: [0, 1, 0.6, 1], scale: 1 }}
-          transition={{ duration: 0.5 }}
-        />
-      )}
-      {p.error > 0 && (
-        <motion.div
-          key={`e${p.error}`}
-          className="absolute inset-0 bg-bad"
-          initial={{ opacity: 0.9 }}
-          animate={{ opacity: 0 }}
-          transition={{ duration: 1.1, ease: 'easeOut' }}
-        />
-      )}
-      {p.hintCell && <div className="hint-pulse absolute inset-[5%] z-[2] rounded-[28%] border-[3px] border-orange-deep" />}
-      {p.selected && (
-        <motion.div
-          layoutId="selection"
-          className="absolute inset-[3%] rounded-[24%] border-[3px] border-orange shadow-[0_0_0_3px_rgba(242,166,90,0.25)]"
-          transition={{ type: 'spring', stiffness: 700, damping: 40 }}
-        />
-      )}
+        {p.mark === 'cross' && <CrossGlyph />}
+        {p.mark === 'cat' && (
+          <div className="cat-pop absolute inset-[7%]">
+            <div className={p.won ? 'cat-cheer size-full' : 'size-full'} style={p.won ? { animationDelay: `${p.delay}s` } : undefined}>
+              <CatArt cat={p.cat} mood={p.won ? 'happy' : 'normal'} />
+            </div>
+            {p.revealed && <span className="absolute -top-[4%] -right-[4%] size-[22%] rounded-full border-2 border-white bg-orange" />}
+          </div>
+        )}
+        {p.conflictKey > 0 && (
+          <div key={p.conflictKey} className="conflict-ring absolute inset-[5%] rounded-[30%] border-[3px] border-bad-deep" />
+        )}
+      </div>
+      {p.dimmed && <div className="absolute inset-0 bg-cream/65" />}
+      {p.hintCell && <div className="hint-pulse absolute inset-[6%] rounded-[28%] border-[3px] border-orange-deep" />}
     </div>
   );
 });
 
-function useBorders(size: number, regions: readonly number[]) {
+/** Region border flags per cell, and faint lines between cells of a same region. */
+function useGeometry(size: number, regions: readonly number[]) {
   return useMemo(() => {
-    let thick = '';
-    let thin = '';
+    const edges: number[] = [];
+    let inner = '';
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
         const i = r * size + c;
-        if (c < size - 1) {
-          const seg = `M${c + 1} ${r}V${r + 1}`;
-          if (regions[i] !== regions[i + 1]) thick += seg;
-          else thin += seg;
-        }
-        if (r < size - 1) {
-          const seg = `M${c} ${r + 1}H${c + 1}`;
-          if (regions[i] !== regions[i + size]) thick += seg;
-          else thin += seg;
-        }
+        const g = regions[i];
+        let f = 0;
+        if (r === 0 || regions[i - size] !== g) f |= TOP;
+        if (c === size - 1 || regions[i + 1] !== g) f |= RIGHT;
+        if (r === size - 1 || regions[i + size] !== g) f |= BOTTOM;
+        if (c === 0 || regions[i - 1] !== g) f |= LEFT;
+        edges.push(f);
+        if (c < size - 1 && regions[i + 1] === g) inner += `M${c + 1} ${r + 0.12}V${r + 0.88}`;
+        if (r < size - 1 && regions[i + size] === g) inner += `M${c + 0.12} ${r + 1}H${c + 0.88}`;
       }
     }
-    return { thick, thin };
+    return { edges, inner };
   }, [size, regions]);
 }
 
 export function Board(props: BoardProps) {
-  const { game, colors, collection, blocked, showBlocked, selected, feedback, hintView, hidden, crossDrag, onTap, onPaint } = props;
+  const { game, colors, collection, blocked, showBlocked, feedback, hintView, hidden, doubleTapMs, onIntents } = props;
   const { puzzle, marks } = game;
   const N = puzzle.size;
-  const ref = useRef<HTMLDivElement>(null);
-  const controls = useAnimationControls();
-  const borders = useBorders(N, puzzle.regions);
-  const drag = useRef<{ start: CellIndex; last: CellIndex; on: boolean; cells: CellIndex[]; painting: boolean; id: number } | null>(null);
-  const [preview, setPreview] = useState<{ cells: Set<CellIndex>; on: boolean } | null>(null);
+  const surface = useRef<HTMLDivElement>(null);
+  const rect = useRef<DOMRect | null>(null);
+  const geometry = useGeometry(N, puzzle.regions);
 
-  // Shake the grid on a charged error.
-  useEffect(() => {
-    if (feedback?.kind === 'error' && feedback.charged) {
-      void controls.start({ x: [0, -7, 7, -5, 5, -2, 0], transition: { duration: 0.42 } });
-    }
-  }, [feedback, controls]);
-
-  const cellAt = useCallback(
-    (clientX: number, clientY: number): CellIndex | null => {
-      const el = ref.current;
-      if (!el) return null;
-      const rect = el.getBoundingClientRect();
-      const c = Math.floor(((clientX - rect.left) / rect.width) * N);
-      const r = Math.floor(((clientY - rect.top) / rect.height) * N);
-      if (r < 0 || c < 0 || r >= N || c >= N) return null;
-      return r * N + c;
-    },
+  // Latest marks for the gesture engine, without re-creating it.
+  const marksRef = useRef(marks);
+  marksRef.current = marks;
+  const tapMs = useRef(doubleTapMs);
+  tapMs.current = doubleTapMs;
+  const engine = useMemo(
+    () => new GestureEngine({ size: N, doubleTapMs: tapMs.current }, (cell) => marksRef.current[cell] ?? 'empty'),
     [N],
   );
+  useEffect(() => engine.configure({ doubleTapMs }), [engine, doubleTapMs]);
+  useEffect(() => engine.reset(), [engine, puzzle.id, game.startedAt]);
+
+  // Safari iOS: swallow the compatibility click and any double-tap zoom on the
+  // grid. Pointer events are the single source of truth.
+  useEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    installGhostClickGuard();
+    const stop = (e: Event) => e.preventDefault();
+    el.addEventListener('touchstart', stop, { passive: false });
+    el.addEventListener('touchmove', stop, { passive: false });
+    el.addEventListener('touchend', stop, { passive: false });
+    el.addEventListener('dblclick', stop);
+    return () => {
+      el.removeEventListener('touchstart', stop);
+      el.removeEventListener('touchmove', stop);
+      el.removeEventListener('touchend', stop);
+      el.removeEventListener('dblclick', stop);
+    };
+  }, []);
+
+  const toGrid = (clientX: number, clientY: number): GridPoint => {
+    const r = rect.current ?? (surface.current as HTMLDivElement).getBoundingClientRect();
+    return { x: ((clientX - r.left) / r.width) * N, y: ((clientY - r.top) / r.height) * N };
+  };
+
+  const active = !hidden && game.status === 'playing';
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (hidden || game.status !== 'playing') return;
-    const cell = cellAt(e.clientX, e.clientY);
-    if (cell === null) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { start: cell, last: cell, on: marks[cell] !== 'cross', cells: [cell], painting: false, id: e.pointerId };
+    if (e.pointerType !== 'mouse') armGhostClickGuard(e.clientX, e.clientY);
+    if (!active || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    rect.current = e.currentTarget.getBoundingClientRect();
+    if (!engine.busy) e.currentTarget.setPointerCapture(e.pointerId);
+    const out = engine.down(e.pointerId, toGrid(e.clientX, e.clientY), e.timeStamp);
+    if (out.length) onIntents(out);
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    if (!d || d.id !== e.pointerId || !crossDrag) return;
-    const cell = cellAt(e.clientX, e.clientY);
-    if (cell === null || cell === d.last) return;
-    d.last = cell;
-    d.painting = true;
-    if (!d.cells.includes(cell)) d.cells.push(cell);
-    setPreview({ cells: new Set(d.cells.filter((c) => marks[c] !== 'cat')), on: d.on });
+    if (!engine.busy) return;
+    // Coalesced events: every intermediate position of a fast finger.
+    const events = e.nativeEvent.getCoalescedEvents?.() ?? [];
+    const points = events.length > 0 ? events : [e.nativeEvent];
+    const out: GestureIntent[] = [];
+    for (const ev of points) out.push(...engine.move(e.pointerId, toGrid(ev.clientX, ev.clientY)));
+    if (out.length) onIntents(out);
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = drag.current;
-    drag.current = null;
-    setPreview(null);
-    if (!d || d.id !== e.pointerId) return;
-    if (d.painting) onPaint(d.cells, d.on);
-    else onTap(d.start);
+    if (e.pointerType !== 'mouse') armGhostClickGuard(e.clientX, e.clientY);
+    const out = engine.up(e.pointerId, toGrid(e.clientX, e.clientY), e.timeStamp);
+    rect.current = null;
+    if (out.length) onIntents(out);
   };
 
-  const onPointerCancel = () => {
-    drag.current = null;
-    setPreview(null);
+  const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const out = engine.cancel(e.pointerId);
+    rect.current = null;
+    if (out.length) onIntents(out);
   };
 
   const hint = hintView?.hint;
@@ -204,7 +214,7 @@ export function Board(props: BoardProps) {
   }, [hint, N, puzzle.regions]);
   const conflicts = useMemo(() => new Set(feedback?.conflicts ?? []), [feedback]);
   const won = game.status === 'won';
-  const catsOrder = useMemo(() => {
+  const catOrder = useMemo(() => {
     const order = new Map<CellIndex, number>();
     let k = 0;
     marks.forEach((m, i) => {
@@ -212,22 +222,25 @@ export function Board(props: BoardProps) {
     });
     return order;
   }, [marks]);
+  const spotlight = hintUnitCells.size > 0 || hintCells.size > 0;
 
   return (
-    <motion.div animate={controls} className="relative aspect-square w-full">
+    <div className="relative aspect-square w-full">
       <div
-        ref={ref}
+        ref={surface}
         role="grid"
         aria-label={`Grille ${N} par ${N}`}
-        className="board-surface relative size-full overflow-hidden rounded-[18px] bg-sand shadow-soft ring-[2.5px] ring-ink"
+        className="board-surface relative size-full rounded-[20px] bg-cream p-[3px] shadow-soft"
+        style={{ touchAction: 'none' }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onPointerCancel}
         onContextMenu={(e) => e.preventDefault()}
       >
         <div
-          className="isolate grid size-full transition-[filter] duration-300"
+          className="relative grid size-full transition-[filter] duration-300"
           style={{
             gridTemplateColumns: `repeat(${N}, minmax(0, 1fr))`,
             gridTemplateRows: `repeat(${N}, minmax(0, 1fr))`,
@@ -240,40 +253,31 @@ export function Board(props: BoardProps) {
               <Cell
                 key={i}
                 mark={mark}
-                color={colors[reg] as RegionColor}
+                fill={(colors[reg] as RegionColor).fill}
+                edges={geometry.edges[i] as number}
                 cat={catForRegion(collection, reg, puzzle.seed)}
                 blocked={showBlocked && blocked.has(i)}
-                selected={selected === i && !won}
+                dimmed={spotlight && !hintUnitCells.has(i) && !hintCells.has(i)}
                 hintCell={hintCells.has(i)}
-                dimmed={hintUnitCells.size > 0 && !hintUnitCells.has(i) && !hintCells.has(i)}
-                error={feedback?.kind === 'error' && feedback.cell === i ? feedback.id : 0}
-                conflict={conflicts.has(i) ? (feedback?.id ?? 0) : 0}
-                preview={preview && preview.cells.has(i) ? preview.on : null}
+                errorKey={feedback?.kind === 'error' && feedback.cell === i ? feedback.id : 0}
+                conflictKey={conflicts.has(i) ? (feedback?.id ?? 0) : 0}
                 won={won}
                 revealed={game.revealed.includes(i)}
-                delay={(catsOrder.get(i) ?? 0) * 0.07}
+                delay={(catOrder.get(i) ?? 0) * 0.08}
               />
             );
           })}
+          {/* Faint lines between cells of a same region: countable, never a black grid. */}
+          <svg
+            viewBox={`0 0 ${N} ${N}`}
+            preserveAspectRatio="none"
+            className="pointer-events-none absolute inset-0 size-full"
+            aria-hidden
+          >
+            <path d={geometry.inner} stroke="#FFFFFF" strokeOpacity="0.55" strokeWidth="1" strokeLinecap="round" vectorEffect="non-scaling-stroke" fill="none" />
+          </svg>
         </div>
-        <svg
-          viewBox={`0 0 ${N} ${N}`}
-          preserveAspectRatio="none"
-          className="pointer-events-none absolute inset-0 size-full"
-          aria-hidden
-          style={{ opacity: hidden ? 0.25 : 1 }}
-        >
-          <path d={borders.thin} stroke="#292929" strokeOpacity="0.13" strokeWidth="1" vectorEffect="non-scaling-stroke" fill="none" />
-          <path
-            d={borders.thick}
-            stroke="#292929"
-            strokeWidth="2.6"
-            strokeLinecap="square"
-            vectorEffect="non-scaling-stroke"
-            fill="none"
-          />
-        </svg>
       </div>
-    </motion.div>
+    </div>
   );
 }

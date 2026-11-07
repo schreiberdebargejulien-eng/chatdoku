@@ -17,11 +17,7 @@ export function MessageBar({
   onCloseHint,
   onMoreHint,
   onDismiss,
-  placed,
-  total,
 }: {
-  placed: number;
-  total: number;
   feedback: Feedback | null;
   hintView: HintView | null;
   onCloseHint: () => void;
@@ -31,29 +27,20 @@ export function MessageBar({
   const show = feedback ? 'feedback' : hintView ? 'hint' : null;
   return (
     // Fixed height: the grid never jumps when a message appears.
-    <div className="relative flex h-[118px] w-full shrink-0 items-center px-4" aria-live="polite">
+    <div className="relative flex h-[104px] w-full shrink-0 items-center px-4" aria-live="polite">
       <AnimatePresence mode="wait">
         {show === null && (
-          <motion.div
-            key="progress"
+          <motion.p
+            key="help"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex w-full flex-col items-center gap-2"
+            className="w-full text-center text-[13px] leading-relaxed font-semibold text-muted"
           >
-            <div className="flex gap-1.5">
-              {Array.from({ length: total }, (_, i) => (
-                <motion.span
-                  key={i}
-                  animate={{ scale: i < placed ? [1.5, 1] : 1 }}
-                  className={`size-2.5 rounded-full ${i < placed ? 'bg-orange' : 'bg-sand-deep'}`}
-                />
-              ))}
-            </div>
-            <span className="text-[13px] font-semibold text-muted">
-              {placed}/{total} chats placés
-            </span>
-          </motion.div>
+            <b className="text-ink-soft">Touche</b> : croix · <b className="text-ink-soft">Double touche</b> : chat
+            <br />
+            <b className="text-ink-soft">Glisse</b> pour poser plusieurs croix
+          </motion.p>
         )}
         {show === 'feedback' && feedback && (
           <motion.button

@@ -7,6 +7,7 @@ import {
   clearCrosses,
   createGame,
   crossesOf,
+  doubleTap,
   MAX_LIVES,
   paintCrosses,
   placeCat,
@@ -200,5 +201,53 @@ describe('Annuler, indices, chrono', () => {
     g = tick(g, 3_600_000);
     expect(g.elapsedMs).toBe(6000);
     expect(tick(playSolution(createGame(puzzle)), 1000).elapsedMs).toBe(0);
+  });
+});
+
+describe('Gestes : double tap et tracé', () => {
+  const sol0 = solution[0] as number;
+
+  it('double tap (avec annulation du premier tap) place un chat sans laisser de croix', () => {
+    let g = paintCrosses(createGame(puzzle), [sol0], true); // 1st tap: cross
+    const t = doubleTap(g, sol0, strict, true);
+    g = t.state;
+    expect(t.event.type).toBe('cat');
+    expect(g.marks[sol0]).toBe('cat');
+    expect(g.history).toHaveLength(1);
+  });
+
+  it('double tap invalide : une seule vie perdue, la case est barrée', () => {
+    let g = placeCat(createGame(puzzle), sol0).state;
+    const bad = toIndex(N, 0, ((puzzle.solution[0] as number) + 3) % N);
+    g = paintCrosses(g, [bad], true);
+    const t = doubleTap(g, bad, strict, true);
+    expect(t.event.type).toBe('error');
+    expect(t.state.lives).toBe(2);
+    expect(t.state.marks[bad]).toBe('cross');
+    expect(catsOf(t.state)).toEqual([sol0]);
+  });
+
+  it('double tap sur un chat : retiré en mode libre, verrouillé en mode strict', () => {
+    const wrong = wrongButLegal(createGame(puzzle));
+    const g = placeCat(createGame(puzzle), wrong, lax).state;
+    expect(doubleTap(g, wrong, lax).state.marks[wrong]).toBe('empty');
+    const ok = placeCat(createGame(puzzle), sol0, strict).state;
+    expect(doubleTap(ok, sol0, strict).state.marks[sol0]).toBe('cat');
+  });
+
+  it('un tracé forme une seule entrée d’annulation', () => {
+    let g = paintCrosses(createGame(puzzle), [0], true);
+    g = paintCrosses(g, [1, 2], true, true);
+    g = paintCrosses(g, [3], true, true);
+    expect(g.history).toHaveLength(1);
+    expect(crossesOf(g)).toEqual([0, 1, 2, 3]);
+    expect(crossesOf(undo(g))).toEqual([]);
+  });
+
+  it('le tracé ne touche jamais aux vies ni aux chats', () => {
+    let g = placeCat(createGame(puzzle), sol0).state;
+    g = paintCrosses(g, Array.from({ length: N * N }, (_, i) => i), true, true);
+    expect(g.lives).toBe(3);
+    expect(g.marks[sol0]).toBe('cat');
   });
 });

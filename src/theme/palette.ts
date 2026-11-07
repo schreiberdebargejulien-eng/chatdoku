@@ -1,6 +1,6 @@
 import { createRng, regionAdjacency, shuffle, type PuzzleLayout } from '../game-engine';
 
-/** Soft, low-saturation region colours. `name` is used in hints ("la région Menthe"). */
+/** Medium pastel region colours (vivid enough to read, never harsh). `name` is used in hints ("la région Menthe"). */
 export interface RegionColor {
   readonly name: string;
   readonly fill: string;
@@ -9,16 +9,16 @@ export interface RegionColor {
 }
 
 export const REGION_COLORS: readonly RegionColor[] = [
-  { name: 'Pêche', fill: '#F9D9C2', deep: '#EDB48C' },
-  { name: 'Menthe', fill: '#CFEBD9', deep: '#93CFA9' },
-  { name: 'Lavande', fill: '#DDD6F3', deep: '#AFA2E0' },
-  { name: 'Citron', fill: '#F5EDB8', deep: '#E3D277' },
-  { name: 'Ciel', fill: '#D0E4F5', deep: '#94BFE5' },
-  { name: 'Rose', fill: '#F7D3DD', deep: '#E9A1B5' },
-  { name: 'Sauge', fill: '#DFE6CB', deep: '#B7C890' },
-  { name: 'Ardoise', fill: '#DEE2E8', deep: '#A9B2C0' },
-  { name: 'Lilas', fill: '#EBD5EE', deep: '#CFA2D6' },
-  { name: 'Lagon', fill: '#C9EAE7', deep: '#86CFC8' },
+  { name: 'Pêche', fill: '#F7B994', deep: '#E0915F' },
+  { name: 'Menthe', fill: '#A3DDB9', deep: '#6BBF8C' },
+  { name: 'Lavande', fill: '#BDB3EE', deep: '#8F80DA' },
+  { name: 'Citron', fill: '#F3DE84', deep: '#D8BC45' },
+  { name: 'Ciel', fill: '#9DCBF0', deep: '#5FA6DD' },
+  { name: 'Rose', fill: '#F4AFC4', deep: '#E07D9C' },
+  { name: 'Sauge', fill: '#C9DB9F', deep: '#9DB666' },
+  { name: 'Ardoise', fill: '#B7C1D1', deep: '#8593AB' },
+  { name: 'Lilas', fill: '#DDB1E6', deep: '#BC7FCB' },
+  { name: 'Lagon', fill: '#8FD8CF', deep: '#4FB8AB' },
 ];
 
 function rgb(hex: string): [number, number, number] {
